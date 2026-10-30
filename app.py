@@ -6,7 +6,7 @@ from pathlib import Path
 import gradio as gr
 import trimesh
 from backend import RESOLUTIONS, infer, remove_background, unload
-from mesh import export_glb, to_trimesh
+from mesh import PREVIEW_FACES, export_glb, preview_mesh, to_trimesh
 from PIL import ImageOps
 from runtime import MODE
 
@@ -26,9 +26,10 @@ def cache_glb(mesh, name):
     with tempfile.TemporaryDirectory(prefix="hi3d_") as directory:
         path = Path(directory) / name
         export_glb(mesh, path)
+        size_mb = path.stat().st_size / 1024**2
         from gradio.processing_utils import save_file_to_cache
 
-        return save_file_to_cache(str(path), gr.utils.get_upload_folder())
+        return save_file_to_cache(str(path), gr.utils.get_upload_folder()), size_mb
 
 
 def generate(
@@ -72,18 +73,28 @@ def generate(
         raise gr.Error(str(error)) from error
     progress(0.9, desc="Exporting meshes")
     # a generated coarse mesh goes into the coarse mesh input, where an uploaded one is shown
-    coarse = cache_glb(to_trimesh(coarse_mesh), "coarse.glb") if generated else gr.update()
+    coarse = cache_glb(to_trimesh(coarse_mesh), "coarse.glb")[0] if generated else gr.update()
     refined_mesh = to_trimesh(refined)
-    refined_path = cache_glb(refined_mesh, "refined.glb")
+    refined_path, _ = cache_glb(refined_mesh, "refined.glb")
+    shown = preview_mesh(refined_mesh)
+    preview_path, preview_mb = cache_glb(shown, "refined_preview.glb")
     progress(1, desc="Ready")
     info = f"{resolution}, seed {seed}: {len(refined_mesh.faces):,} triangles in {time.monotonic() - started:.1f} s"
+    if len(shown.faces) < len(refined_mesh.faces):
+        info += f" (the preview shows {len(shown.faces):,}; the download has all of them)"
+    # PREVIEW_HEAD shows the load time once the viewer draws a mesh with exactly this many indices.
+    status = (
+        f'<div class="preview-status" data-indices="{len(shown.faces) * 3}">'
+        f"Loading 3D preview ({preview_mb:.0f} MB)…</div>"
+    )
     return (
         coarse,
         generated or coarse_was_generated,
-        refined_path,
+        preview_path,
         gr.update(value=refined_path, interactive=True),
         seed,
         info,
+        status,
     )
 
 
@@ -101,6 +112,39 @@ CSS = """
 #remove-background:hover { background: #378159; }
 #unload-models { background: #a32626; border-color: #bd3535; color: white; }
 #unload-models:hover { background: #bf3030; }
+.preview-status { animation: preview-pulse 1.5s ease-in-out infinite; }
+.preview-status[data-done] { animation: none; }
+@keyframes preview-pulse { 50% { opacity: 0.4; } }
+"""
+
+# Gradio's Model3D has no "loaded" event, so watch draw calls for the new mesh's index count.
+PREVIEW_HEAD = """
+<script>
+(() => {
+  const check = (count) => {
+    const status = document.querySelector("#preview-status .preview-status:not([data-done])");
+    if (!status) return;
+    status.dataset.start ??= performance.now();
+    if (count !== Number(status.dataset.indices)) return;
+    status.dataset.done = "";
+    status.textContent = `3D preview loaded in ${((performance.now() - status.dataset.start) / 1000).toFixed(1)} s`;
+  };
+  const wrap = (proto, method, countIndex) => {
+    const original = proto?.[method];
+    if (!original) return;
+    proto[method] = function (...args) {
+      check(args[countIndex]);
+      return original.apply(this, args);
+    };
+  };
+  for (const proto of [window.WebGLRenderingContext?.prototype, window.WebGL2RenderingContext?.prototype]) {
+    wrap(proto, "drawElements", 1);
+  }
+  wrap(window.WebGL2RenderingContext?.prototype, "drawElementsInstanced", 1);
+  wrap(window.GPURenderPassEncoder?.prototype, "drawIndexed", 0);
+  wrap(window.GPURenderBundleEncoder?.prototype, "drawIndexed", 0);
+})();
+</script>
 """
 
 
@@ -140,6 +184,7 @@ def build_demo():
                     octree_resolution = gr.Slider(64, 512, value=380, step=4, label="Octree resolution")
             with gr.Column():
                 preview = gr.Model3D(label="Refined mesh", height=640, clear_color=(0.08, 0.09, 0.12, 1))
+                status = gr.HTML("", elem_id="preview-status")
                 info = gr.Markdown("")
                 download = gr.DownloadButton(label="Download refined GLB", interactive=False)
                 gr.Markdown("The GLB contains the untextured shape only; no input image or generation settings.")
@@ -176,7 +221,7 @@ def build_demo():
                 coarse_steps,
                 octree_resolution,
             ],
-            [coarse_file, coarse_generated, preview, download, seed, info],
+            [coarse_file, coarse_generated, preview, download, seed, info, status],
             show_progress_on=[preview],
             concurrency_limit=1,
             concurrency_id="model",
@@ -188,4 +233,4 @@ def build_demo():
 
 
 if __name__ == "__main__":
-    build_demo().launch(css=CSS)
+    build_demo().launch(css=CSS, head=PREVIEW_HEAD)

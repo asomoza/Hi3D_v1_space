@@ -1,0 +1,17 @@
+[project]
+name = "hi3d-v1-space"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "gradio==6.30.0", "spaces==0.51.3", "torch==2.11.0", "diffusers==0.41.0",
+  "transformers==5.20.2", "accelerate>=1.15", "einops==0.8.2", "safetensors", "numpy", "Pillow", "scipy",
+  "scikit-image", "trimesh", "pyfqmr==0.5.0",
+]
+[dependency-groups]
+dev = ["pytest"]
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu128" }]
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

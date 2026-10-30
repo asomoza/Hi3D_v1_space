@@ -1,0 +1,6 @@
+BEN2 background removal adapted from PramaLLC/BEN2 revision e48a20765fb421d19dcdb0bf3cc61e802ca5ec8f (BEN2.py).
+https://huggingface.co/PramaLLC/BEN2
+Prama LLC code: MIT. See LICENSE.
+Changes: inference-only subset of the base model; video export, the optional foreground refiner and the global seeding and
+cudnn/matmul settings are omitted; timm helpers replaced by local equivalents and torchvision preprocessing by the
+application. Formatting normalized.

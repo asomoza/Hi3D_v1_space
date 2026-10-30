@@ -1,0 +1,14 @@
+gradio==6.30.0
+spaces==0.51.3
+torch==2.11.0
+diffusers==0.41.0
+transformers==5.20.2
+accelerate>=1.15
+einops==0.8.2
+safetensors
+numpy
+Pillow
+scipy
+scikit-image
+trimesh
+pyfqmr==0.5.0
